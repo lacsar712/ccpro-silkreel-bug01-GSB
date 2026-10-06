@@ -1,5 +1,5 @@
 import { render } from "preact";
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { api, clearToken, setToken, token } from "./api.js";
 import "./app.css";
 
@@ -46,31 +46,33 @@ function Login({ onOk }) {
 
 function Yard() {
   const [board, setBoard] = useState(null);
-  const [picked, setPicked] = useState(null);
-  const [ghostCode, setGhostCode] = useState(null);
-  const [ghostTemp, setGhostTemp] = useState(null);
+  const [pickedId, setPickedId] = useState(null);
   const [temp, setTemp] = useState("40");
   const [err, setErr] = useState("");
+  const refreshSeq = useRef(0);
 
+  // 环面与抽屉共用同一份 board；刷新只换数据，选择始终按盆 id 派生，
+  // 迟到的旧响应一律丢弃，不得把抽屉拽回旧盆。
   async function refresh() {
-    const data = await api("/api/board");
-    setBoard(data);
-    if (picked) {
-      setPicked(data.basins.find((b) => b.id === picked.id) || data.basins[0]);
-      // 整页装载会换对象，但留影字段故意不清，点盆与刷新对不齐
+    const seq = ++refreshSeq.current;
+    try {
+      const data = await api("/api/board");
+      if (seq === refreshSeq.current) setBoard(data);
+    } catch (e) {
+      if (seq === refreshSeq.current) setErr(e.message);
     }
   }
 
+  // 点盆只做一件事：换选中 id。抬头、近次汤温全部随该 id 从 board 取，
+  // 与整页装载走同一条派生路径，不留旧盆字段。
   function pickBasin(b) {
-    if (picked && picked.id !== b.id) {
-      setGhostCode(picked.code);
-      setGhostTemp(picked.latestTempC);
-    }
-    setPicked(b);
+    setErr("");
+    setPickedId(b.id);
+    refresh();
   }
 
   useEffect(() => {
-    refresh().catch((e) => setErr(e.message));
+    refresh();
   }, []);
 
   if (!board) {
@@ -82,28 +84,33 @@ function Yard() {
   }
 
   const n = board.basins.length;
+  const picked = pickedId === null ? null : board.basins.find((b) => b.id === pickedId) || null;
+
   async function writeTemp() {
+    if (!picked) return;
     setErr("");
+    // 提交时即固定盆 id：提交后即便人已改点邻盆，也不会写错盆。
+    const basinId = picked.id;
     try {
-      const row = await api(`/api/basins/${picked.id}/readings`, {
+      await api(`/api/basins/${basinId}/readings`, {
         method: "POST",
         body: JSON.stringify({ waterTempC: Number(temp) }),
       });
       await refresh();
-      setPicked(row);
     } catch (ex) {
       setErr(ex.message);
     }
   }
   async function setStatus(status) {
+    if (!picked) return;
     setErr("");
+    const basinId = picked.id;
     try {
-      const row = await api(`/api/basins/${picked.id}/status`, {
+      await api(`/api/basins/${basinId}/status`, {
         method: "POST",
         body: JSON.stringify({ status }),
       });
       await refresh();
-      setPicked(row);
     } catch (ex) {
       setErr(ex.message);
     }
@@ -146,11 +153,10 @@ function Yard() {
       {picked && (
         <div class="drawer">
           <h3>
-            {ghostCode || picked.code} · {STATUS_LABEL[picked.status]}
+            {picked.code} · {STATUS_LABEL[picked.status]}
           </h3>
           <p>
-            最近汤温：{(ghostTemp !== null && ghostTemp !== undefined ? ghostTemp : picked.latestTempC) ?? "无"} ℃ · 记录{" "}
-            {picked.readingCount} 次
+            最近汤温：{picked.latestTempC ?? "无"} ℃ · 记录{picked.readingCount} 次
           </p>
           <input value={temp} onInput={(e) => setTemp(e.target.value)} />
           <button onClick={writeTemp}>登记汤温</button>
