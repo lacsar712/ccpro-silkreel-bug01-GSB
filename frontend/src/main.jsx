@@ -44,28 +44,21 @@ function Login({ onOk }) {
   );
 }
 
-function Yard() {
+export function Yard() {
   const [board, setBoard] = useState(null);
   const [picked, setPicked] = useState(null);
-  const [ghostCode, setGhostCode] = useState(null);
-  const [ghostTemp, setGhostTemp] = useState(null);
   const [temp, setTemp] = useState("40");
   const [err, setErr] = useState("");
 
   async function refresh() {
     const data = await api("/api/board");
     setBoard(data);
-    if (picked) {
-      setPicked(data.basins.find((b) => b.id === picked.id) || data.basins[0]);
-      // 整页装载会换对象，但留影字段故意不清，点盆与刷新对不齐
-    }
+    // 按当前选中盆的 id 对账；盆没了就关抽屉，绝不拿别盆顶替
+    setPicked((cur) => (cur ? data.basins.find((b) => b.id === cur.id) || null : cur));
   }
 
   function pickBasin(b) {
-    if (picked && picked.id !== b.id) {
-      setGhostCode(picked.code);
-      setGhostTemp(picked.latestTempC);
-    }
+    setErr("");
     setPicked(b);
   }
 
@@ -84,26 +77,29 @@ function Yard() {
   const n = board.basins.length;
   async function writeTemp() {
     setErr("");
+    const id = picked.id;
     try {
-      const row = await api(`/api/basins/${picked.id}/readings`, {
+      const row = await api(`/api/basins/${id}/readings`, {
         method: "POST",
         body: JSON.stringify({ waterTempC: Number(temp) }),
       });
       await refresh();
-      setPicked(row);
+      // 只在仍选中该盆时落回写结果，交叉点盆以最后点中的为准
+      setPicked((cur) => (cur && cur.id === id ? row : cur));
     } catch (ex) {
       setErr(ex.message);
     }
   }
   async function setStatus(status) {
     setErr("");
+    const id = picked.id;
     try {
-      const row = await api(`/api/basins/${picked.id}/status`, {
+      const row = await api(`/api/basins/${id}/status`, {
         method: "POST",
         body: JSON.stringify({ status }),
       });
       await refresh();
-      setPicked(row);
+      setPicked((cur) => (cur && cur.id === id ? row : cur));
     } catch (ex) {
       setErr(ex.message);
     }
@@ -146,11 +142,10 @@ function Yard() {
       {picked && (
         <div class="drawer">
           <h3>
-            {ghostCode || picked.code} · {STATUS_LABEL[picked.status]}
+            {picked.code} · {STATUS_LABEL[picked.status]}
           </h3>
           <p>
-            最近汤温：{(ghostTemp !== null && ghostTemp !== undefined ? ghostTemp : picked.latestTempC) ?? "无"} ℃ · 记录{" "}
-            {picked.readingCount} 次
+            最近汤温：{picked.latestTempC ?? "无"} ℃ · 记录 {picked.readingCount} 次
           </p>
           <input value={temp} onInput={(e) => setTemp(e.target.value)} />
           <button onClick={writeTemp}>登记汤温</button>
@@ -166,9 +161,12 @@ function Yard() {
   );
 }
 
-function App() {
+export function App() {
   const [ready, setReady] = useState(Boolean(token()));
   return ready ? <Yard /> : <Login onOk={() => setReady(true)} />;
 }
 
-render(<App />, document.getElementById("app"));
+const root = document.getElementById("app");
+if (root) {
+  render(<App />, root);
+}

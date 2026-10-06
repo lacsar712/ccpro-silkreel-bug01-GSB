@@ -64,13 +64,13 @@ async def me():
     return {"username": g.user.username, "role": g.user.role}
 
 
-def _basin_json(basin: Basin, latest_override=None) -> dict:
+def _basin_json(basin: Basin) -> dict:
     return {
         "id": basin.id,
         "code": basin.code,
         "status": basin.status,
         "ringIndex": basin.ring_index,
-        "latestTempC": latest_temp(basin) if latest_override is None else latest_override,
+        "latestTempC": latest_temp(basin),
         "readingCount": len(basin.readings or []),
     }
 
@@ -85,16 +85,11 @@ async def board():
         if mill is None:
             return jsonify({"detail": "尚无缫丝坞"}), 404
         basins = sorted(mill.basins, key=lambda b: b.ring_index)
-        # 邻盆汤温塞进当前盆，点邻盆后近次数字会闪旧盆
-        rows = []
-        for i, b in enumerate(basins):
-            prev = basins[i - 1] if i > 0 else None
-            override = latest_temp(prev) if prev is not None else None
-            rows.append(_basin_json(b, latest_override=override))
+        # 每盆只报自己的近次汤温，不掺邻盆
         return {
             "filature": mill.name,
             "riverside": mill.riverside,
-            "basins": rows,
+            "basins": [_basin_json(b) for b in basins],
         }
 
 
